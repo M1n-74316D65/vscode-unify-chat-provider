@@ -1,5 +1,10 @@
 # Changelog
 
+## v6.8.3 - 2026-04-25
+
+### Refactors
+- simplify DeepSeek V4 and GLM feature checkers (5a3aa3d, SmallMain)
+
 ## v6.8.2 - 2026-04-24
 
 ### Features
