@@ -1,5 +1,13 @@
 # Changelog
 
+## v6.8.4 - 2026-04-27
+
+### Features
+- increase GPT-5.5 max input tokens to 1050000 (933cce8, SmallMain)
+
+### Refactors
+- increase default timeouts and format code in utils (c3e0bb5, SmallMain)
+
 ## v6.8.3 - 2026-04-25
 
 ### Refactors
