@@ -395,7 +395,7 @@ export class OpenAICodexProvider extends OpenAIResponsesProvider {
     return [
       {
         id: 'gpt-5.5',
-        maxInputTokens: 400000,
+        maxInputTokens: 272000,
         ...CODEX_REASONING_SUMMARY_DEFAULTS,
       },
       { id: 'gpt-5.4', ...CODEX_REASONING_SUMMARY_DEFAULTS },
