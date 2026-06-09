@@ -16,7 +16,11 @@ import {
 import { createSimpleHttpLogger } from '../../logger';
 import type { RequestLogger } from '../../logger';
 import { ApiProvider } from '../interface';
-import { ModelConfig, PerformanceTrace, ProviderConfig } from '../../types';
+import {
+  ChatRequestTrace,
+  ModelConfig,
+  ProviderConfig,
+} from '../../types';
 import type { AuthTokenInfo } from '../../auth/types';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ProviderHttpLogger } from '../../logger';
@@ -32,6 +36,7 @@ import {
   isCacheControlMarker,
   isImageMarker,
   isInternalMarker,
+  isUsageMarker,
   normalizeImageMimeType,
   resolveChatNetwork,
   resolveGoogleSdkTimeoutMs,
@@ -43,6 +48,7 @@ import { getBaseModelId } from '../../model-id-utils';
 import { ThinkingBlockMetadata } from '../types';
 import {
   createFirstTokenRecorder,
+  createCopilotUsage,
   estimateTokenCount as sharedEstimateTokenCount,
   getToken,
   getUnifiedUserAgent,
@@ -781,7 +787,11 @@ export class GoogleAIStudioProvider implements ApiProvider {
         ? { text: thinkingText, thought: true }
         : undefined;
     } else if (part instanceof vscode.LanguageModelDataPart) {
-      if (isCacheControlMarker(part) || isInternalMarker(part)) {
+      if (
+        isCacheControlMarker(part) ||
+        isInternalMarker(part) ||
+        isUsageMarker(part)
+      ) {
         return undefined;
       }
 
@@ -892,11 +902,12 @@ export class GoogleAIStudioProvider implements ApiProvider {
     model: ModelConfig,
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     options: vscode.ProvideLanguageModelChatResponseOptions,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     token: vscode.CancellationToken,
     logger: RequestLogger,
     credential: AuthTokenInfo,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     const abortController = new AbortController();
     const cancellationListener = token.onCancellationRequested(() => {
       abortController.abort();
@@ -992,7 +1003,7 @@ export class GoogleAIStudioProvider implements ApiProvider {
           timedStream,
           token,
           logger,
-          performanceTrace,
+          requestTrace,
           expectedIdentity,
         );
       } else {
@@ -1003,7 +1014,12 @@ export class GoogleAIStudioProvider implements ApiProvider {
             config: generateConfig,
           });
         }, { connectionTimeoutMs: requestTimeoutMs, retryConfig: chatNetwork.retry });
-        yield* this.parseMessage(data, performanceTrace, logger, expectedIdentity);
+        yield* this.parseMessage(
+          data,
+          requestTrace,
+          logger,
+          expectedIdentity,
+        );
       }
     } finally {
       cancellationListener.dispose();
@@ -1012,10 +1028,11 @@ export class GoogleAIStudioProvider implements ApiProvider {
 
   protected async *parseMessage(
     message: GenerateContentResponse,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     logger.providerResponseChunk(JSON.stringify(message));
 
     performanceTrace.ttft =
@@ -1068,7 +1085,7 @@ export class GoogleAIStudioProvider implements ApiProvider {
     );
 
     if (message.usageMetadata) {
-      this.processUsage(message.usageMetadata, performanceTrace, logger);
+      this.processUsage(message.usageMetadata, requestTrace, logger);
     }
   }
 
@@ -1076,9 +1093,10 @@ export class GoogleAIStudioProvider implements ApiProvider {
     stream: AsyncIterable<GenerateContentResponse>,
     token: vscode.CancellationToken,
     logger: RequestLogger,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     const recordFirstToken = createFirstTokenRecorder(performanceTrace);
 
     let _completeThinking = '';
@@ -1174,21 +1192,26 @@ export class GoogleAIStudioProvider implements ApiProvider {
     }
 
     if (lastUsage) {
-      this.processUsage(lastUsage, performanceTrace, logger);
+      this.processUsage(lastUsage, requestTrace, logger);
     }
   }
 
   private processUsage(
     usage: NonNullable<GenerateContentResponse['usageMetadata']>,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
   ): void {
-    sharedProcessUsage(
-      usage.candidatesTokenCount,
-      performanceTrace,
-      logger,
-      usage,
+    const promptTokens = usage.promptTokenCount ?? 0;
+    const completionTokens =
+      typeof usage.totalTokenCount === 'number'
+        ? usage.totalTokenCount - promptTokens
+        : (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
+    const normalizedUsage = createCopilotUsage(
+      promptTokens,
+      completionTokens,
+      usage.cachedContentTokenCount,
     );
+    sharedProcessUsage(requestTrace, logger, normalizedUsage);
   }
 
   estimateTokenCount(text: string): number {

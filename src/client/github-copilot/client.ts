@@ -9,8 +9,8 @@ import type { AuthTokenInfo } from '../../auth/types';
 import type { RequestLogger } from '../../logger';
 import { getBaseModelId } from '../../model-id-utils';
 import type {
+  ChatRequestTrace,
   ModelConfig,
-  PerformanceTrace,
   ProviderConfig,
 } from '../../types';
 import { isImageMarker } from '../../utils';
@@ -282,7 +282,7 @@ export class GitHubCopilotProvider implements ApiProvider {
     model: ModelConfig,
     messages: readonly LanguageModelChatRequestMessage[],
     options: ProvideLanguageModelChatResponseOptions,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     token: CancellationToken,
     logger: RequestLogger,
     credential: AuthTokenInfo,
@@ -297,7 +297,7 @@ export class GitHubCopilotProvider implements ApiProvider {
       model,
       messages,
       options,
-      performanceTrace,
+      requestTrace,
       token,
       logger,
       credential,

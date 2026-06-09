@@ -6,7 +6,11 @@ import {
 import { createSimpleHttpLogger } from '../../logger';
 import type { ProviderHttpLogger, RequestLogger } from '../../logger';
 import { ApiProvider } from '../interface';
-import { ProviderConfig, ModelConfig, PerformanceTrace } from '../../types';
+import {
+  ChatRequestTrace,
+  ProviderConfig,
+  ModelConfig,
+} from '../../types';
 import type { AuthTokenInfo } from '../../auth/types';
 import OpenAI from 'openai';
 import {
@@ -19,6 +23,7 @@ import {
   isCacheControlMarker,
   isImageMarker,
   isInternalMarker,
+  isUsageMarker,
   normalizeImageMimeType,
   parseThinkingTags,
   resolveContextCacheConfig,
@@ -32,6 +37,7 @@ import {
   buildBaseUrl,
   createCustomFetch,
   createFirstTokenRecorder,
+  createCopilotUsage,
   estimateTokenCount as sharedEstimateTokenCount,
   getToken,
   getTokenType,
@@ -420,7 +426,7 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
       if (isCacheControlMarker(part)) {
         // ignore it, just use the officially recommended caching strategy.
         return undefined;
-      } else if (isInternalMarker(part)) {
+      } else if (isInternalMarker(part) || isUsageMarker(part)) {
         return undefined;
       } else if (isImageMarker(part)) {
         if (role === vscode.LanguageModelChatMessageRole.System) {
@@ -852,11 +858,12 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
     model: ModelConfig,
     messages: readonly LanguageModelChatRequestMessage[],
     options: ProvideLanguageModelChatResponseOptions,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     token: CancellationToken,
     logger: RequestLogger,
     credential: AuthTokenInfo,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     const abortController = new AbortController();
     const cancellationListener = token.onCancellationRequested(() => {
       abortController.abort();
@@ -1098,7 +1105,7 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
           timedStream,
           token,
           logger,
-          performanceTrace,
+          requestTrace,
           expectedIdentity,
         );
       } else {
@@ -1111,7 +1118,7 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
         );
         yield* this.parseMessage(
           data,
-          performanceTrace,
+          requestTrace,
           logger,
           expectedIdentity,
         );
@@ -1123,10 +1130,11 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
 
   private async *parseMessage(
     message: ChatCompletion,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     // NOTE: The current behavior of VSCode is such that all Parts returned here will be
     // aggregated into a single Part during the next request, and only the Thinking part
     // will be retained during the tool invocation round; most other types of Parts
@@ -1199,7 +1207,7 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
     );
 
     if (message.usage) {
-      this.processUsage(message.usage, performanceTrace, logger);
+      this.processUsage(message.usage, requestTrace, logger);
     }
   }
 
@@ -1360,9 +1368,10 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
     stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
     token: vscode.CancellationToken,
     logger: RequestLogger,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     let snapshot: ChatCompletionSnapshot | undefined;
     let usage: CompletionUsage | null | undefined;
     const finalizedChoiceIndexes = new Set();
@@ -1519,7 +1528,7 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
     }
 
     if (usage) {
-      this.processUsage(usage, performanceTrace, logger);
+      this.processUsage(usage, requestTrace, logger);
     }
   }
 
@@ -1679,15 +1688,15 @@ export class OpenAIChatCompletionProvider implements ApiProvider {
 
   private processUsage(
     usage: CompletionUsage,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
   ) {
-    sharedProcessUsage(
+    const normalizedUsage = createCopilotUsage(
+      usage.prompt_tokens,
       usage.completion_tokens,
-      performanceTrace,
-      logger,
-      usage,
+      usage.prompt_tokens_details?.cached_tokens,
     );
+    sharedProcessUsage(requestTrace, logger, normalizedUsage);
   }
 
   estimateTokenCount(text: string): number {

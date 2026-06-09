@@ -1,14 +1,16 @@
 import { getBaseModelId } from '../model-id-utils';
-import type {
-  ProviderHttpLogger,
-  ProviderUsage,
-  RequestLogger,
-} from '../logger';
+import type { ProviderHttpLogger, RequestLogger } from '../logger';
 import * as vscode from 'vscode';
 import { Agent } from 'undici';
 import type { Dispatcher } from 'undici';
 import type { AuthTokenInfo } from '../auth/types';
-import { ModelConfig, PerformanceTrace, ProviderConfig } from '../types';
+import {
+  ChatRequestTrace,
+  CopilotUsage,
+  ModelConfig,
+  PerformanceTrace,
+  ProviderConfig,
+} from '../types';
 import {
   bodyInitToLoggableValue,
   DEFAULT_CHAT_RETRY_CONFIG,
@@ -384,23 +386,49 @@ export function estimateTokenCount(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function normalizeTokenCount(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+export function createCopilotUsage(
+  promptTokens: number | null | undefined,
+  completionTokens: number | null | undefined,
+  cachedPromptTokens: number | null | undefined = 0,
+): CopilotUsage {
+  const prompt = normalizeTokenCount(promptTokens);
+  const completion = normalizeTokenCount(completionTokens);
+
+  return {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: prompt + completion,
+    prompt_tokens_details: {
+      cached_tokens: normalizeTokenCount(cachedPromptTokens),
+    },
+  };
+}
+
 /**
  * Process usage information and update performance trace.
  */
 export function processUsage(
-  outputTokens: number | undefined,
-  performanceTrace: PerformanceTrace,
+  requestTrace: ChatRequestTrace,
   logger: RequestLogger,
-  usage: ProviderUsage,
+  usage: CopilotUsage,
 ): void {
-  if (outputTokens) {
+  const performanceTrace = requestTrace.performance;
+  if (usage.completion_tokens > 0) {
     performanceTrace.tps =
-      (outputTokens /
+      (usage.completion_tokens /
         (Date.now() - (performanceTrace.tts + performanceTrace.ttf))) *
       1000;
   } else {
     performanceTrace.tps = NaN;
   }
+  requestTrace.usage = usage;
   logger.usage(usage);
 }
 

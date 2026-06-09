@@ -6,7 +6,12 @@ import {
 } from './defaults';
 import { ApiProvider } from './client/interface';
 import { createRequestLogger } from './logger';
-import { ModelConfig, PerformanceTrace, ProviderConfig } from './types';
+import {
+  ChatRequestTrace,
+  ModelConfig,
+  PerformanceTrace,
+  ProviderConfig,
+} from './types';
 import { getBaseModelId } from './model-id-utils';
 import { createProvider } from './client/utils';
 import {
@@ -19,6 +24,7 @@ import {
   delay,
   getAllModelsForProvider,
   getAllModelsForProviderSync,
+  createUsageDataPart,
   isAbortLikeError,
   isPlaceholderModelId,
   resolveMeaningfulError,
@@ -519,6 +525,9 @@ export class UnifyChatService implements vscode.LanguageModelChatProvider {
       ttf: 0,
       ttft: 0,
     };
+    const requestTrace: ChatRequestTrace = {
+      performance: performanceTrace,
+    };
 
     let providerForBalance: ProviderConfig | undefined;
     let outcome: 'success' | 'error' | 'cancelled' = 'success';
@@ -578,6 +587,7 @@ export class UnifyChatService implements vscode.LanguageModelChatProvider {
             performanceTrace.ttft = 0;
             performanceTrace.tps = 0;
             performanceTrace.tl = 0;
+            requestTrace.usage = undefined;
           }
 
           let partCount = 0;
@@ -588,7 +598,7 @@ export class UnifyChatService implements vscode.LanguageModelChatProvider {
             resolvedRequestModel,
             messages,
             options,
-            performanceTrace,
+            requestTrace,
             token,
             logger,
             credential,
@@ -658,6 +668,12 @@ export class UnifyChatService implements vscode.LanguageModelChatProvider {
         }
       } finally {
         retryCancellationListener.dispose();
+      }
+
+      if (requestTrace.usage && !token.isCancellationRequested) {
+        const usagePart = createUsageDataPart(requestTrace.usage);
+        logger.vscodeOutput(usagePart);
+        progress.report(usagePart);
       }
 
       performanceTrace.tl = Date.now() - performanceTrace.tts;

@@ -14,7 +14,7 @@ import type {
 import { GoogleAIStudioProvider } from './ai-studio-client';
 import type { RequestLogger } from '../../logger';
 import type { AuthTokenInfo } from '../../auth/types';
-import { ModelConfig, PerformanceTrace } from '../../types';
+import { ChatRequestTrace, ModelConfig } from '../../types';
 import {
   createStatefulMarkerIdentity,
   DEFAULT_CHAT_RETRY_CONFIG,
@@ -1714,11 +1714,12 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
     model: ModelConfig,
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     options: vscode.ProvideLanguageModelChatResponseOptions,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     token: vscode.CancellationToken,
     logger: RequestLogger,
     credential: AuthTokenInfo,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     this.validateAuth();
 
     const abortController = new AbortController();
@@ -2234,7 +2235,7 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
               timedStream,
               token,
               logger,
-              performanceTrace,
+              requestTrace,
               expectedIdentity,
             )) {
               emittedPartCount++;
@@ -2289,7 +2290,7 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
         }
         yield* this.parseMessage(
           toGenerateContentResponse(raw),
-          performanceTrace,
+          requestTrace,
           logger,
           expectedIdentity,
         );

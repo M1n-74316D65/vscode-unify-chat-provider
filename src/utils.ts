@@ -4,6 +4,7 @@ import { DataPartMimeTypes, StatefulMarkerData } from './client/types';
 import type { ProviderHttpLogger } from './logger';
 import { officialModelsManager } from './official-models-manager';
 import type {
+  CopilotUsage,
   ContextCacheConfig,
   ContextCacheType,
   ModelConfig,
@@ -1675,8 +1676,46 @@ export function isInternalMarker(part: vscode.LanguageModelDataPart): boolean {
   return part.mimeType === DataPartMimeTypes.StatefulMarker;
 }
 
+export function isUsageMarker(part: vscode.LanguageModelDataPart): boolean {
+  return part.mimeType === DataPartMimeTypes.Usage;
+}
+
 export function isImageMarker(part: vscode.LanguageModelDataPart): boolean {
   return part.mimeType.startsWith('image/');
+}
+
+function normalizeTokenCount(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(value));
+}
+
+export function normalizeCopilotUsage(usage: CopilotUsage): CopilotUsage {
+  const promptTokens = normalizeTokenCount(usage.prompt_tokens);
+  const completionTokens = normalizeTokenCount(usage.completion_tokens);
+  const cachedTokens = normalizeTokenCount(
+    usage.prompt_tokens_details.cached_tokens,
+  );
+
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+    prompt_tokens_details: {
+      cached_tokens: cachedTokens,
+    },
+  };
+}
+
+export function createUsageDataPart(
+  usage: CopilotUsage,
+): vscode.LanguageModelDataPart {
+  const normalized = normalizeCopilotUsage(usage);
+  return new vscode.LanguageModelDataPart(
+    Buffer.from(JSON.stringify(normalized), 'utf8'),
+    DataPartMimeTypes.Usage,
+  );
 }
 
 export interface StatefulMarkerEnvelope<T extends object> {

@@ -27,6 +27,7 @@ import {
   isCacheControlMarker,
   isImageMarker,
   isInternalMarker,
+  isUsageMarker,
   encodeStatefulMarkerPart,
   decodeStatefulMarkerPart,
   normalizeImageMimeType,
@@ -39,7 +40,11 @@ import {
 } from '../../utils';
 import { getBaseModelId } from '../../model-id-utils';
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../../defaults';
-import { ModelConfig, PerformanceTrace, ProviderConfig } from '../../types';
+import {
+  ChatRequestTrace,
+  ModelConfig,
+  ProviderConfig,
+} from '../../types';
 import { TracksToolInput } from '@anthropic-ai/sdk/lib/BetaMessageStream';
 import {
   ENCRYPTED_THINKING_PLACEHOLDER,
@@ -50,6 +55,7 @@ import {
   buildBaseUrl,
   createCustomFetch,
   createFirstTokenRecorder,
+  createCopilotUsage,
   estimateTokenCount as sharedEstimateTokenCount,
   isFeatureSupported,
   mergeHeaders,
@@ -462,7 +468,7 @@ export class AnthropicProvider implements ApiProvider {
       if (isCacheControlMarker(part)) {
         // ignore it, just use the officially recommended caching strategy.
         return undefined;
-      } else if (isInternalMarker(part)) {
+      } else if (isInternalMarker(part) || isUsageMarker(part)) {
         return undefined;
       } else if (isImageMarker(part)) {
         if (role === vscode.LanguageModelChatMessageRole.System) {
@@ -713,11 +719,12 @@ export class AnthropicProvider implements ApiProvider {
     model: ModelConfig,
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     options: vscode.ProvideLanguageModelChatResponseOptions,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     token: vscode.CancellationToken,
     logger: RequestLogger,
     credential: AuthTokenInfo,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     const abortController = new AbortController();
     const cancellationListener = token.onCancellationRequested(() => {
       abortController.abort();
@@ -960,7 +967,7 @@ export class AnthropicProvider implements ApiProvider {
           timedStream,
           token,
           logger,
-          performanceTrace,
+          requestTrace,
           fineGrainedToolStreamingEnabled,
           requestState,
           expectedIdentity,
@@ -978,7 +985,7 @@ export class AnthropicProvider implements ApiProvider {
         );
         yield* this.parseMessage(
           result,
-          performanceTrace,
+          requestTrace,
           logger,
           requestState,
           expectedIdentity,
@@ -1027,11 +1034,12 @@ export class AnthropicProvider implements ApiProvider {
 
   private async *parseMessage(
     message: Anthropic.Beta.Messages.BetaMessage,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
     state: { userId?: string },
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     // NOTE: The current behavior of VSCode is such that all Parts returned here will be
     // aggregated into a single Part during the next request, and only the Thinking part
     // will be retained during the tool invocation round; most other types of Parts
@@ -1122,7 +1130,7 @@ export class AnthropicProvider implements ApiProvider {
     }
 
     if (message.usage) {
-      this.processUsage(message.usage, performanceTrace, logger);
+      this.processUsage(message.usage, requestTrace, logger);
     }
   }
 
@@ -1130,11 +1138,12 @@ export class AnthropicProvider implements ApiProvider {
     stream: AsyncIterable<BetaRawMessageStreamEvent>,
     token: vscode.CancellationToken,
     logger: RequestLogger,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     fineGrainedToolStreamingEnabled: boolean,
     state: { userId?: string },
     expectedIdentity: string,
   ): AsyncGenerator<vscode.LanguageModelResponsePart2> {
+    const performanceTrace = requestTrace.performance;
     let raw: BetaMessage | undefined;
 
     const recordFirstToken = createFirstTokenRecorder(performanceTrace);
@@ -1308,7 +1317,7 @@ export class AnthropicProvider implements ApiProvider {
           }
 
           if (raw?.usage) {
-            this.processUsage(raw.usage, performanceTrace, logger);
+            this.processUsage(raw.usage, requestTrace, logger);
           }
           break;
         }
@@ -1520,10 +1529,17 @@ export class AnthropicProvider implements ApiProvider {
 
   private processUsage(
     usage: BetaUsage,
-    performanceTrace: PerformanceTrace,
+    requestTrace: ChatRequestTrace,
     logger: RequestLogger,
   ) {
-    sharedProcessUsage(usage.output_tokens, performanceTrace, logger, usage);
+    const normalizedUsage = createCopilotUsage(
+      (usage.input_tokens ?? 0) +
+        (usage.cache_creation_input_tokens ?? 0) +
+        (usage.cache_read_input_tokens ?? 0),
+      usage.output_tokens,
+      usage.cache_read_input_tokens,
+    );
+    sharedProcessUsage(requestTrace, logger, normalizedUsage);
   }
 
   estimateTokenCount(text: string): number {

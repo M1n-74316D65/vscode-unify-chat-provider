@@ -273,3 +273,20 @@ export interface PerformanceTrace {
    */
   tl: number;
 }
+
+export interface ChatRequestTrace {
+  performance: PerformanceTrace;
+  /**
+   * Normalized usage payload for Copilot's private `usage` DataPart path.
+   */
+  usage?: CopilotUsage;
+}
+
+export interface CopilotUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  prompt_tokens_details: {
+    cached_tokens: number;
+  };
+}
