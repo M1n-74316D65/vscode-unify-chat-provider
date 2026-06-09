@@ -341,11 +341,17 @@ export function resolveAnthropicServiceTier(
     case 'standard':
     case 'flex':
     case 'scale':
-    case 'priority':
       return 'standard_only';
     default:
       return undefined;
   }
+}
+
+export function isAnthropicFastModeServiceTier(
+  provider: ProviderConfig,
+  model: ModelConfig,
+): boolean {
+  return (model.serviceTier ?? provider.serviceTier) === 'priority';
 }
 
 const HEADER_VALUE_PLACEHOLDER_PATTERN = /\$\{([A-Z0-9_]+)\}/g;

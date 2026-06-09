@@ -54,6 +54,7 @@ import {
   isFeatureSupported,
   mergeHeaders,
   parseToolArguments,
+  isAnthropicFastModeServiceTier,
   processUsage as sharedProcessUsage,
   resolveAnthropicServiceTier,
   getToken,
@@ -823,6 +824,11 @@ export class AnthropicProvider implements ApiProvider {
       model.parallelToolCalling,
     );
     const serviceTier = resolveAnthropicServiceTier(this.config, model);
+    const fastModeEnabled = isAnthropicFastModeServiceTier(this.config, model);
+
+    if (fastModeEnabled) {
+      betaFeatures.add('fast-mode-2026-02-01');
+    }
 
     try {
       let requestBase: Omit<MessageCreateParamsStreaming, 'stream'> = {
@@ -830,9 +836,8 @@ export class AnthropicProvider implements ApiProvider {
         messages: anthropicMessages,
         max_tokens: model.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
         ...(serviceTier !== undefined ? { service_tier: serviceTier } : {}),
+        ...(fastModeEnabled ? { speed: 'fast' } : {}),
       };
-
-      Object.assign(requestBase, this.config.extraBody, model.extraBody);
 
       if (system) {
         requestBase.system = system;
@@ -918,6 +923,8 @@ export class AnthropicProvider implements ApiProvider {
         historyUserId,
         requestState,
       });
+
+      Object.assign(requestBase, this.config.extraBody, model.extraBody);
 
       const client = this.createClient(
         logger,
