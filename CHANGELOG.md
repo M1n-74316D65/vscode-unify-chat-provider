@@ -1,5 +1,14 @@
 # Changelog
 
+## v7.1.0 - 2026-06-10
+
+### Features
+- add global and per-provider proxy configuration (224c835, SmallMain)
+- add SOCKS proxy support (7eca300, SmallMain)
+
+### Fixes
+- force remove 'max_output_tokens' from Codex client request fields (6510571, SmallMain)
+
 ## v7.0.0 - 2026-06-10
 
 ### Features
