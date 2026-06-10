@@ -28,6 +28,7 @@ const CODEX_COMMON_REQUEST_FIELDS_TO_DELETE = [
   'prompt_cache_retention',
   'safety_identifier',
   'stream_options',
+  'max_output_tokens',
 ] as const;
 const CODEX_REASONING_SUMMARY_DEFAULTS = {
   maxOutputTokens: undefined,
