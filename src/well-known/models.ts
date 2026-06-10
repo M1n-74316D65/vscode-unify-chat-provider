@@ -45,6 +45,12 @@ const OPENAI_CODEX_REASONING_EFFORTS = [
 const OPENAI_OSS_REASONING_EFFORTS = ['high', 'medium', 'low'] as const;
 const TENCENT_HY3_REASONING_EFFORTS = ['high', 'medium', 'low'] as const;
 const DEEPSEEK_V4_REASONING_EFFORTS = ['max', 'high', 'none'] as const;
+const NVIDIA_MINIMAX_REASONING_EFFORTS = [
+  'high',
+  'medium',
+  'low',
+  'minimal',
+] as const;
 const ANTHROPIC_OPUS_4_7_REASONING_EFFORTS = [
   'max',
   'xhigh',
@@ -1679,6 +1685,13 @@ const _WELL_KNOWN_MODELS = [
         config: {
           id: 'minimaxai/minimax-m2.7',
           maxOutputTokens: 32768,
+          thinking: {
+            type: 'enabled',
+            effort: 'high',
+          },
+          presetTemplates: [
+            openAiReasoningEffort(NVIDIA_MINIMAX_REASONING_EFFORTS, 'high'),
+          ],
         },
       },
       {
@@ -1740,6 +1753,13 @@ const _WELL_KNOWN_MODELS = [
         config: {
           id: 'minimaxai/minimax-m2.5',
           maxOutputTokens: 32768,
+          thinking: {
+            type: 'enabled',
+            effort: 'high',
+          },
+          presetTemplates: [
+            openAiReasoningEffort(NVIDIA_MINIMAX_REASONING_EFFORTS, 'high'),
+          ],
         },
       },
       {
@@ -1801,6 +1821,13 @@ const _WELL_KNOWN_MODELS = [
         config: {
           id: 'minimaxai/minimax-m2.1',
           maxOutputTokens: 32768,
+          thinking: {
+            type: 'enabled',
+            effort: 'high',
+          },
+          presetTemplates: [
+            openAiReasoningEffort(NVIDIA_MINIMAX_REASONING_EFFORTS, 'high'),
+          ],
         },
       },
       {
@@ -1854,6 +1881,13 @@ const _WELL_KNOWN_MODELS = [
         config: {
           id: 'minimaxai/minimax-m2',
           maxOutputTokens: 32768,
+          thinking: {
+            type: 'enabled',
+            effort: 'high',
+          },
+          presetTemplates: [
+            openAiReasoningEffort(NVIDIA_MINIMAX_REASONING_EFFORTS, 'high'),
+          ],
         },
       },
       {
