@@ -564,7 +564,9 @@ export async function refreshAccessToken(options: {
         Accept: '*/*',
         'Accept-Encoding': 'gzip, deflate, br',
         'User-Agent': randomized['User-Agent'],
-        'X-Goog-Api-Client': randomized['X-Goog-Api-Client'],
+        'X-Goog-Api-Client':
+          randomized['X-Goog-Api-Client'] ??
+          GEMINI_CLI_HEADERS['X-Goog-Api-Client'],
       },
       body: new URLSearchParams({
         client_id: ANTIGRAVITY_CLIENT_ID,

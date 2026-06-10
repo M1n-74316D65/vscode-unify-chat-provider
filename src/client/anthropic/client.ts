@@ -201,6 +201,19 @@ export class AnthropicProvider implements ApiProvider {
     return requestBase;
   }
 
+  protected finalizeRequestBase(
+    requestBase: Omit<MessageCreateParamsStreaming, 'stream'>,
+    _options: {
+      model: ModelConfig;
+      stream: boolean;
+      credential?: AuthTokenInfo;
+      historyUserId?: string;
+      requestState: { userId?: string };
+    },
+  ): Omit<MessageCreateParamsStreaming, 'stream'> {
+    return requestBase;
+  }
+
   private resolveThinkingDisplay(
     model: ModelConfig,
     thinkingEnabled: boolean,
@@ -1015,6 +1028,13 @@ export class AnthropicProvider implements ApiProvider {
       });
 
       Object.assign(requestBase, this.config.extraBody, model.extraBody);
+      requestBase = this.finalizeRequestBase(requestBase, {
+        model,
+        stream,
+        credential,
+        historyUserId,
+        requestState,
+      });
 
       const client = this.createClient(
         logger,

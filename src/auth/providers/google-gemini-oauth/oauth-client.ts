@@ -8,7 +8,6 @@
 import {
   GEMINI_CLI_CLIENT_ID,
   GEMINI_CLI_CLIENT_SECRET,
-  GEMINI_CLI_SCOPES,
   GEMINI_CLI_ENDPOINT,
   GEMINI_CLI_ENDPOINT_FALLBACKS,
   GEMINI_CLI_API_HEADERS,
@@ -17,6 +16,7 @@ import {
   GOOGLE_OAUTH_AUTH_URL,
   GOOGLE_OAUTH_TOKEN_URL,
   GOOGLE_USERINFO_URL,
+  getGeminiCliOAuthScopes,
   getGeminiCliRandomizedHeaders,
 } from './constants';
 import type {
@@ -137,6 +137,7 @@ function decodeState(state: string): GeminiCliAuthState {
  */
 export async function authorizeGeminiCli(options: {
   redirectUri: string;
+  oauthType?: string;
 }): Promise<GeminiCliAuthorization> {
   const pkce = generatePKCE(43);
 
@@ -147,7 +148,10 @@ export async function authorizeGeminiCli(options: {
   url.searchParams.set('client_id', GEMINI_CLI_CLIENT_ID);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', redirectUri);
-  url.searchParams.set('scope', GEMINI_CLI_SCOPES.join(' '));
+  url.searchParams.set(
+    'scope',
+    getGeminiCliOAuthScopes(options.oauthType).join(' '),
+  );
   url.searchParams.set('code_challenge', pkce.challenge);
   url.searchParams.set('code_challenge_method', pkce.method);
   url.searchParams.set('state', state);

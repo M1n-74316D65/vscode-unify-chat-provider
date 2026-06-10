@@ -46,6 +46,7 @@ function toPersistableConfig(
     identityId: config?.identityId,
     token: config?.token,
     projectId: config?.projectId,
+    oauthType: config?.oauthType ?? 'code_assist',
     managedProjectId: config?.managedProjectId,
     tier: config?.tier,
     tierId: config?.tierId,
@@ -490,7 +491,10 @@ export class GeminiCliOAuthProvider implements AuthProvider {
     const callbackResult = await performGeminiCliAuthorization(
       async (redirectUri) => {
         const authorization = await import('./oauth-client').then((m) =>
-          m.authorizeGeminiCli({ redirectUri }),
+          m.authorizeGeminiCli({
+            redirectUri,
+            oauthType: this.config?.oauthType,
+          }),
         );
         return authorization.url;
       },
@@ -576,6 +580,7 @@ export class GeminiCliOAuthProvider implements AuthProvider {
       identityId: randomUUID(),
       token: tokenRef,
       projectId: projectId || undefined,
+      oauthType: this.config?.oauthType ?? 'code_assist',
       managedProjectId: accountInfo.managedProjectId,
       tier: accountInfo.tier,
       tierId: accountInfo.tierId,

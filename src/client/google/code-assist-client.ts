@@ -32,11 +32,13 @@ import {
   createCustomFetch,
   getToken,
   getTokenType,
-  mergeHeaders,
 } from '../utils';
 import {
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
+  ANTIGRAVITY_MCP_XML_INSTRUCTION,
+  ANTIGRAVITY_SILENT_BOUNDARY_INSTRUCTION,
   ANTIGRAVITY_SYSTEM_INSTRUCTION,
+  ANTIGRAVITY_SYSTEM_PROMPT_END,
   CLAUDE_DESCRIPTION_PROMPT,
   CLAUDE_TOOL_SYSTEM_INSTRUCTION,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
@@ -45,10 +47,6 @@ import {
   type AntigravityHeaderStyle,
 } from '../../auth/providers/antigravity-oauth/constants';
 import { getBaseModelId } from '../../model-id-utils';
-import {
-  buildFingerprintHeaders,
-  getSessionFingerprint,
-} from './antigravity-fingerprint';
 import { extractServerSuggestedRetryDelayMs } from './retry-info';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -238,6 +236,19 @@ function extractConversationSeed(
   return [systemText, userText].filter(Boolean).join('|');
 }
 
+function extractFirstUserText(contents: Content[]): string {
+  for (const content of contents) {
+    if (content.role !== 'user') {
+      continue;
+    }
+    const text = extractPrimaryTextFromParts(content.parts);
+    if (text) {
+      return text;
+    }
+  }
+  return '';
+}
+
 function buildSignatureSessionId(options: {
   modelId: string;
   projectId: string;
@@ -264,8 +275,17 @@ function buildSignatureSessionId(options: {
   return `${PLUGIN_SESSION_ID}:${modelForKey}:${projectKey}:${conversationKey}`;
 }
 
-function generateAntigravityImageRequestId(): string {
-  return `image_gen/${Date.now()}/${randomUUID()}/12`;
+function buildStableAntigravitySessionId(contents: Content[]): string {
+  const firstUserText = extractFirstUserText(contents);
+  if (!firstUserText) {
+    const digest = createHash('sha256').update(randomUUID(), 'utf8').digest();
+    const value = digest.readBigUInt64BE(0) & 0x7fffffffffffffffn;
+    return `-${value.toString()}`;
+  }
+
+  const digest = createHash('sha256').update(firstUserText, 'utf8').digest();
+  const value = digest.readBigUInt64BE(0) & 0x7fffffffffffffffn;
+  return `-${value.toString()}`;
 }
 
 function sanitizeAntigravityToolName(name: string): string {
@@ -285,6 +305,19 @@ function sanitizeAntigravityToolName(name: string): string {
   }
 
   return sanitized;
+}
+
+function hasMcpTools(tools: Tool[] | undefined): boolean {
+  if (!tools) {
+    return false;
+  }
+
+  return tools.some((tool) =>
+    tool.functionDeclarations?.some(
+      (decl) =>
+        typeof decl.name === 'string' && decl.name.startsWith('mcp__'),
+    ),
+  );
 }
 
 function buildToolParameterSignature(schema: unknown): string {
@@ -1326,126 +1359,23 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
     // return this.fallbackProjectId;
   }
 
-  private async buildAntigravityHeaders(
+  private async buildCodeAssistContentHeaders(
     credential: AuthTokenInfo,
-    modelConfig?: ModelConfig,
-    options?: { streaming?: boolean; thinkingEnabled?: boolean },
   ): Promise<Record<string, string>> {
     const token = getToken(credential);
     if (!token) {
       throw new Error(`Missing OAuth access token for ${this.codeAssistName}`);
     }
 
-    const headers = mergeHeaders(
-      token,
-      this.config.extraHeaders,
-      modelConfig?.extraHeaders,
-    );
-
-    // Antigravity requires OAuth bearer auth (not x-goog-api-key).
     const tokenType = getTokenType(credential) ?? 'Bearer';
-    headers['Authorization'] = `${tokenType} ${token}`;
-
-    // Remove API key headers if present.
-    for (const key of Object.keys(headers)) {
-      const lower = key.toLowerCase();
-      if (
-        lower === 'x-api-key' ||
-        lower === 'x-goog-api-key' ||
-        lower === 'x-goog-user-project'
-      ) {
-        delete headers[key];
-      }
-    }
-
-    // Required Antigravity headers (match CLIProxy behavior).
-    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
-      headers['Content-Type'] = 'application/json';
-    }
-
     const randomized = await getRandomizedHeaders(this.codeAssistHeaderStyle);
-    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'user-agent')) {
-      headers['User-Agent'] =
-        randomized['User-Agent'] ?? this.codeAssistHeaders['User-Agent'];
-    }
 
-    if (this.codeAssistHeaderStyle === 'gemini-cli') {
-      if (
-        !Object.keys(headers).some(
-          (k) => k.toLowerCase() === 'x-goog-api-client',
-        )
-      ) {
-        headers['X-Goog-Api-Client'] =
-          randomized['X-Goog-Api-Client'] ??
-          this.codeAssistHeaders['X-Goog-Api-Client'];
-      }
-      if (
-        !Object.keys(headers).some((k) => k.toLowerCase() === 'client-metadata')
-      ) {
-        headers['Client-Metadata'] =
-          randomized['Client-Metadata'] ??
-          this.codeAssistHeaders['Client-Metadata'];
-      }
-    } else {
-      // Match Antigravity Manager behavior for content requests: User-Agent only.
-      for (const key of Object.keys(headers)) {
-        const lower = key.toLowerCase();
-        if (
-          lower === 'x-goog-api-client' ||
-          lower === 'client-metadata' ||
-          lower === 'x-goog-quotauser' ||
-          lower === 'x-client-device-id'
-        ) {
-          delete headers[key];
-        }
-      }
-    }
-
-    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'accept')) {
-      headers['Accept'] = options?.streaming
-        ? 'text/event-stream'
-        : 'application/json';
-    }
-
-    if (this.codeAssistHeaderStyle === 'antigravity') {
-      // Fingerprint headers override runtime headers where applicable.
-      const fingerprintHeaders = buildFingerprintHeaders(
-        await getSessionFingerprint(),
-      );
-      for (const [key, value] of Object.entries(fingerprintHeaders)) {
-        if (typeof value === 'string' && value.trim()) {
-          headers[key] = value;
-        }
-      }
-    }
-
-    if (options?.streaming) {
-      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'accept')) {
-        headers['Accept'] = 'text/event-stream';
-      }
-
-      // Enable interleaved thinking streaming for Claude thinking models.
-      if (
-        modelConfig?.id.toLowerCase().includes('claude') &&
-        options.thinkingEnabled
-      ) {
-        const headerKey = Object.keys(headers).find(
-          (k) => k.toLowerCase() === 'anthropic-beta',
-        );
-        const existing = headerKey ? headers[headerKey] : undefined;
-        const interleaved = 'interleaved-thinking-2025-05-14';
-        if (existing) {
-          if (!existing.split(',').some((v) => v.trim() === interleaved)) {
-            headers[headerKey ?? 'anthropic-beta'] =
-              `${existing},${interleaved}`;
-          }
-        } else {
-          headers['anthropic-beta'] = interleaved;
-        }
-      }
-    }
-
-    return headers;
+    return {
+      'Content-Type': 'application/json',
+      Authorization: `${tokenType} ${token}`,
+      'User-Agent':
+        randomized['User-Agent'] ?? this.codeAssistHeaders['User-Agent'],
+    };
   }
 
   private buildAntigravityFunctionCallingConfig(
@@ -1526,13 +1456,27 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
       injectAntigravitySystemInstruction: boolean;
       toolsProvided: boolean;
       isClaudeModel: boolean;
+      hasMcpTools: boolean;
     },
   ): { role: 'user'; parts: Part[] } {
-    const parts = this.collectSystemInstructionParts(systemInstruction);
+    const userSystemParts =
+      this.collectSystemInstructionParts(systemInstruction);
+    const userHasAntigravityIdentity = userSystemParts.some(
+      (part) =>
+        typeof part.text === 'string' && part.text.includes('You are Antigravity'),
+    );
+    const parts: Part[] = [];
 
-    if (options.injectAntigravitySystemInstruction) {
-      parts.unshift({ text: ANTIGRAVITY_SYSTEM_INSTRUCTION });
+    const shouldInjectIdentity =
+      options.injectAntigravitySystemInstruction && !userHasAntigravityIdentity;
+    if (shouldInjectIdentity) {
+      parts.push(
+        { text: ANTIGRAVITY_SYSTEM_INSTRUCTION },
+        { text: ANTIGRAVITY_SILENT_BOUNDARY_INSTRUCTION },
+      );
     }
+
+    parts.push(...userSystemParts);
 
     if (options.isClaudeModel && options.toolsProvided) {
       parts.push({ text: CLAUDE_TOOL_SYSTEM_INSTRUCTION });
@@ -1543,6 +1487,14 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
       : TOOL_DISABLED_INSTRUCTION;
     if (toolText.trim()) {
       parts.push({ text: toolText });
+    }
+
+    if (options.injectAntigravitySystemInstruction && options.hasMcpTools) {
+      parts.push({ text: ANTIGRAVITY_MCP_XML_INSTRUCTION });
+    }
+
+    if (options.injectAntigravitySystemInstruction && !userHasAntigravityIdentity) {
+      parts.push({ text: ANTIGRAVITY_SYSTEM_PROMPT_END });
     }
 
     return { role: 'user', parts: sanitizePartsForRequest(parts) };
@@ -1837,10 +1789,6 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
     // const disableThinkingConfig = isClaudeModel
     //   ? !hasFinalPositionThinking
     //   : false;
-    const claudeThinkingRequested =
-      isClaudeModel && (thinkingEnabled || modelIdLower.includes('thinking'));
-    const isClaudeThinking = claudeThinkingRequested; // && !disableThinkingConfig;
-
     const sdkTools = this.convertTools(options.tools);
     const tools = this.normalizeTools(sdkTools, {
       hardenClaudeTools: isClaudeModel,
@@ -1863,6 +1811,7 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
         injectAntigravitySystemInstruction: injectSystemInstruction,
         toolsProvided,
         isClaudeModel,
+        hasMcpTools: hasMcpTools(sdkTools),
       },
     );
 
@@ -1949,12 +1898,14 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
     const projectId = this.resolveProjectId();
     const sessionId = isAntigravityImageRequest
       ? undefined
-      : buildSignatureSessionId({
-          modelId: resolvedModel.requestModelId,
-          projectId,
-          systemInstruction: systemInstructionForRequest,
-          contents,
-        });
+      : this.codeAssistHeaderStyle === 'antigravity'
+        ? buildStableAntigravitySessionId(contents)
+        : buildSignatureSessionId({
+            modelId: resolvedModel.requestModelId,
+            projectId,
+            systemInstruction: systemInstructionForRequest,
+            contents,
+          });
 
     const requestPayload: Record<string, unknown> = {
       contents,
@@ -1983,9 +1934,7 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
         ? {
             requestType: isAntigravityImageRequest ? 'image_gen' : 'agent',
             userAgent: 'antigravity',
-            requestId: isAntigravityImageRequest
-              ? generateAntigravityImageRequestId()
-              : `agent-${randomUUID()}`,
+            requestId: `agent-${randomUUID()}`,
           }
         : {}),
     };
@@ -1993,10 +1942,7 @@ export abstract class GoogleCodeAssistProvider extends GoogleAIStudioProvider {
     Object.assign(body, this.config.extraBody, model.extraBody);
     deleteSafetySettings(body);
 
-    const headers = await this.buildAntigravityHeaders(credential, model, {
-      streaming: streamEnabled,
-      thinkingEnabled: isClaudeThinking,
-    });
+    const headers = await this.buildCodeAssistContentHeaders(credential);
 
     performanceTrace.ttf = Date.now() - performanceTrace.tts;
 
