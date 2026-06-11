@@ -431,6 +431,7 @@ export class AnthropicClaudeCodeProvider extends AnthropicProvider {
     headers['X-Stainless-Runtime-Version'] = 'v24.3.0';
     headers['X-Stainless-Retry-Count'] = '0';
     headers['X-Stainless-Timeout'] = '600';
+    headers['x-client-request-id'] = randomUUID();
 
     if (options?.stream) {
       headers['x-stainless-helper-method'] = 'stream';

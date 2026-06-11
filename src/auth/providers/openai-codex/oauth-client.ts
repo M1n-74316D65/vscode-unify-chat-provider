@@ -254,6 +254,7 @@ export async function refreshOpenAICodexToken(options: {
       grant_type: 'refresh_token',
       refresh_token: options.refreshToken,
       client_id: OPENAI_CODEX_CLIENT_ID,
+      scope: 'openid profile email',
     }).toString(),
   });
 

@@ -494,6 +494,8 @@ export class GeminiCliOAuthProvider implements AuthProvider {
           m.authorizeGeminiCli({
             redirectUri,
             oauthType: this.config?.oauthType,
+            projectId: projectId || undefined,
+            tierId: this.config?.tierId,
           }),
         );
         return authorization.url;
